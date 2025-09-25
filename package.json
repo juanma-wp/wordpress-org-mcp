@@ -1,8 +1,14 @@
 {
   "name": "wordpress-org-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for WordPress.org plugin analysis and comparison",
   "main": "dist/index.js",
+  "bin": {
+    "wordpress-org-mcp-server": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "scripts": {
     "build": "tsc",
