@@ -6,6 +6,8 @@
 
 A Model Context Protocol (MCP) server that enables Claude Code to analyze, download, and compare [WordPress.org plugins](https://wordpress.org/plugins/) with your local plugins.
 
+**🔗 Repository:** [https://github.com/juanma-wp/wordpress-org-mcp](https://github.com/juanma-wp/wordpress-org-mcp)
+
 ## Features
 
 - **Search plugins** on WordPress.org by keyword
