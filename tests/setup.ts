@@ -4,9 +4,9 @@ import * as path from 'path';
 beforeAll(async () => {
   // Create test directories
   const testDirs = [
-    './test-cache',
-    './test-extracted',
-    './test-fixtures'
+    path.join(process.cwd(), 'test-cache'),
+    path.join(process.cwd(), 'test-extracted'),
+    path.join(process.cwd(), 'test-fixtures')
   ];
 
   for (const dir of testDirs) {
@@ -21,9 +21,9 @@ beforeAll(async () => {
 afterAll(async () => {
   // Clean up test directories
   const testDirs = [
-    './test-cache',
-    './test-extracted',
-    './test-fixtures'
+    path.join(process.cwd(), 'test-cache'),
+    path.join(process.cwd(), 'test-extracted'),
+    path.join(process.cwd(), 'test-fixtures')
   ];
 
   for (const dir of testDirs) {

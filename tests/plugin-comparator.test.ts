@@ -4,7 +4,7 @@ import * as path from 'path';
 
 describe('PluginComparator', () => {
   let comparator: PluginComparator;
-  const testFixturesDir = './test-fixtures';
+  const testFixturesDir = path.join(process.cwd(), 'test-fixtures');
 
   beforeEach(() => {
     comparator = new PluginComparator();

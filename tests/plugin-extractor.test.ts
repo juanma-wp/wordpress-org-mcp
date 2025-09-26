@@ -10,8 +10,8 @@ jest.doMock('yauzl', () => mockYauzl);
 
 describe('PluginExtractor', () => {
   let extractor: PluginExtractor;
-  const testExtractDir = './test-extracted';
-  const testFixturesDir = './test-fixtures';
+  const testExtractDir = path.join(process.cwd(), 'test-extracted');
+  const testFixturesDir = path.join(process.cwd(), 'test-fixtures');
 
   beforeEach(() => {
     extractor = new PluginExtractor(testExtractDir);
