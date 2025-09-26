@@ -1,5 +1,9 @@
 # WordPress.org MCP Server
 
+[![Tests](https://github.com/juanma-wp/wordpress-org-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/juanma-wp/wordpress-org-mcp/actions/workflows/test.yml)
+
+[![npm version](https://badge.fury.io/js/wordpress-org-mcp-server.svg)](https://badge.fury.io/js/wordpress-org-mcp-server) [![npm downloads](https://img.shields.io/npm/dm/wordpress-org-mcp-server.svg)](https://www.npmjs.com/package/wordpress-org-mcp-server)
+
 A Model Context Protocol (MCP) server that enables Claude Code to analyze, download, and compare WordPress.org plugins with your local plugins.
 
 ## Features
@@ -14,9 +18,6 @@ A Model Context Protocol (MCP) server that enables Claude Code to analyze, downl
 ## Installation & Setup
 
 ```bash
-# Install globally
-npm install -g wordpress-org-mcp-server
-
 # Register with Claude CLI
 claude mcp add wordpress-org npx wordpress-org-mcp-server
 
