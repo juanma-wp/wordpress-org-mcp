@@ -5,28 +5,58 @@ import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { SystemPaths } from './system-paths.js';
 
+/**
+ * WordPress plugin information structure as returned by the WordPress.org API.
+ * Contains essential metadata about a plugin including version, download link, and requirements.
+ */
 export interface PluginInfo {
+  /** Display name of the plugin */
   name: string;
+  /** URL-friendly slug identifier */
   slug: string;
+  /** Current version number */
   version: string;
+  /** Direct download URL for the plugin ZIP file */
   download_link: string;
+  /** Brief description of the plugin's functionality */
   short_description: string;
+  /** Plugin author name or organization */
   author: string;
+  /** Plugin's official homepage URL */
   homepage: string;
+  /** Minimum required WordPress version */
   requires: string;
+  /** Latest WordPress version tested with this plugin */
   tested: string;
+  /** Minimum required PHP version */
   requires_php: string;
 }
 
+/**
+ * WordPress.org API client for plugin operations.
+ * Provides methods to search, fetch info, and download plugins from the WordPress.org repository.
+ * Includes local caching to avoid redundant downloads and API calls.
+ */
 export class WordPressOrgAPI {
+  /** Base URL for WordPress.org plugin API */
   private readonly baseUrl = 'https://api.wordpress.org/plugins/info/1.0/';
+  /** Base URL for plugin downloads */
   private readonly downloadBaseUrl = 'https://downloads.wordpress.org/plugin/';
+  /** Directory path where downloaded plugin files are cached */
   public readonly cacheDir: string;
 
+  /**
+   * Initialize the WordPress.org API client.
+   * @param cacheDir - Optional custom cache directory path. Uses system default if not provided.
+   */
   constructor(cacheDir?: string) {
     this.cacheDir = cacheDir || SystemPaths.getCacheDir();
   }
 
+  /**
+   * Ensure the cache directory exists, creating it if necessary.
+   * @throws Error if directory creation fails due to permissions or other issues
+   */
   async ensureCacheDir(): Promise<void> {
     try {
       await fs.mkdir(this.cacheDir, { recursive: true });
@@ -35,6 +65,11 @@ export class WordPressOrgAPI {
     }
   }
 
+  /**
+   * Fetch detailed information about a specific plugin from WordPress.org.
+   * @param slug - The plugin slug (URL-friendly identifier)
+   * @returns Plugin information object or null if plugin not found
+   */
   async getPluginInfo(slug: string): Promise<PluginInfo | null> {
     try {
       const response = await fetch(`${this.baseUrl}${slug}.json`);
@@ -61,6 +96,13 @@ export class WordPressOrgAPI {
     }
   }
 
+  /**
+   * Download a plugin ZIP file from WordPress.org.
+   * Uses local caching to avoid redundant downloads of the same plugin version.
+   * @param slug - The plugin slug to download
+   * @param version - Plugin version to download (default: 'latest')
+   * @returns Path to the downloaded ZIP file, or null if download failed
+   */
   async downloadPlugin(slug: string, version = 'latest'): Promise<string | null> {
     await this.ensureCacheDir();
 
@@ -99,6 +141,12 @@ export class WordPressOrgAPI {
     }
   }
 
+  /**
+   * Search for plugins on WordPress.org by keyword.
+   * @param query - Search query string to match against plugin names and descriptions
+   * @param limit - Maximum number of results to return (default: 10)
+   * @returns Array of plugin information objects matching the search query
+   */
   async searchPlugins(query: string, limit = 10): Promise<PluginInfo[]> {
     try {
       const response = await fetch(`${this.baseUrl}query-plugins/`, {

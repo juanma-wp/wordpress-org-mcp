@@ -2,28 +2,61 @@ import * as diff from 'diff';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+/**
+ * Represents the comparison result for a single file between two plugin versions.
+ * Contains the comparison status and optional diff information.
+ */
 export interface FileComparison {
+  /** Relative path of the file within the plugin directory */
   file: string;
+  /** Comparison status indicating how the file differs between versions */
   status: 'identical' | 'different' | 'local_only' | 'remote_only';
+  /** Unified diff string showing the differences (only present for 'different' status) */
   diff?: string;
+  /** Size of the file in the local version (in bytes) */
   localSize?: number;
+  /** Size of the file in the remote version (in bytes) */
   remoteSize?: number;
 }
 
+/**
+ * Represents the complete comparison result between two plugin versions.
+ * Contains individual file comparisons and summary statistics.
+ */
 export interface PluginComparison {
+  /** Absolute path to the local plugin directory */
   localPath: string;
+  /** Absolute path to the remote plugin directory */
   remotePath: string;
+  /** Array of individual file comparison results */
   files: FileComparison[];
+  /** Summary statistics of the comparison */
   summary: {
+    /** Number of files that are identical between versions */
     identical: number;
+    /** Number of files that have differences between versions */
     different: number;
+    /** Number of files that exist only in the local version */
     localOnly: number;
+    /** Number of files that exist only in the remote version */
     remoteOnly: number;
+    /** Total number of files compared */
     total: number;
   };
 }
 
+/**
+ * Utility class for comparing WordPress plugin directories and generating detailed diffs.
+ * Provides methods to compare plugin versions, analyze file differences, and format results.
+ */
 export class PluginComparator {
+  /**
+   * Compare two plugin directories and generate a detailed comparison report.
+   * Analyzes all files in both directories and categorizes them as identical, different, or unique to one version.
+   * @param localPluginPath - Absolute path to the local plugin directory
+   * @param remotePluginPath - Absolute path to the remote plugin directory
+   * @returns Complete comparison result with individual file analyses and summary statistics
+   */
   async comparePlugins(localPluginPath: string, remotePluginPath: string): Promise<PluginComparison> {
     const localFiles = await this.getPluginFiles(localPluginPath);
     const remoteFiles = await this.getPluginFiles(remotePluginPath);
@@ -83,6 +116,11 @@ export class PluginComparator {
     };
   }
 
+  /**
+   * Recursively get all files in a plugin directory.
+   * @param pluginPath - Absolute path to the plugin directory
+   * @returns Array of relative file paths within the plugin directory
+   */
   private async getPluginFiles(pluginPath: string): Promise<string[]> {
     const files: string[] = [];
 
@@ -109,6 +147,13 @@ export class PluginComparator {
     return files.sort();
   }
 
+  /**
+   * Compare two individual files and generate a detailed comparison.
+   * @param localPath - Absolute path to the local file
+   * @param remotePath - Absolute path to the remote file
+   * @param fileName - Relative filename for the comparison result
+   * @returns FileComparison object with status and optional diff
+   */
   private async compareFiles(localPath: string, remotePath: string, fileName: string): Promise<FileComparison> {
     try {
       const [localContent, remoteContent] = await Promise.all([
@@ -154,6 +199,11 @@ export class PluginComparator {
     }
   }
 
+  /**
+   * Get the file size in bytes for a given file path.
+   * @param filePath - Absolute path to the file
+   * @returns File size in bytes, or undefined if file cannot be accessed
+   */
   private async getFileSize(filePath: string): Promise<number | undefined> {
     try {
       const stats = await fs.stat(filePath);
@@ -163,6 +213,12 @@ export class PluginComparator {
     }
   }
 
+  /**
+   * Format a plugin comparison result into a human-readable summary report.
+   * Creates a nicely formatted text report with statistics and file listings.
+   * @param comparison - The plugin comparison result to format
+   * @returns Formatted summary report as a multi-line string
+   */
   formatComparisonSummary(comparison: PluginComparison): string {
     const { summary } = comparison;
 

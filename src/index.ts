@@ -13,12 +13,34 @@ import { PluginExtractor } from './plugin-extractor.js';
 import { PluginComparator } from './plugin-comparator.js';
 import * as path from 'path';
 
+/**
+ * WordPress.org MCP (Model Context Protocol) Server
+ *
+ * Provides tools for searching, downloading, extracting, and comparing WordPress plugins
+ * from the WordPress.org repository. The server exposes various tools through the MCP protocol
+ * to enable plugin analysis, comparison with local versions, and file-level diff operations.
+ *
+ * Main capabilities:
+ * - Search for plugins on WordPress.org
+ * - Download plugin ZIP files
+ * - Extract and analyze plugin contents
+ * - Compare local plugins with WordPress.org versions
+ * - Generate file-level diffs
+ */
 export class WordPressOrgMCPServer {
+  /** The MCP server instance for handling protocol communication */
   protected server: Server;
+  /** WordPress.org API client for plugin operations */
   private api: WordPressOrgAPI;
+  /** Plugin extraction utility for handling ZIP files */
   private extractor: PluginExtractor;
+  /** Plugin comparison utility for generating diffs */
   private comparator: PluginComparator;
 
+  /**
+   * Initialize the WordPress.org MCP server with all required components.
+   * Sets up the MCP server, API client, extractor, and comparator with optional custom directories.
+   */
   constructor() {
     this.server = new Server(
       {
@@ -43,6 +65,11 @@ export class WordPressOrgMCPServer {
     this.setupToolHandlers();
   }
 
+  /**
+   * Set up all MCP tool handlers and their schemas.
+   * Registers handlers for listing available tools and executing tool calls.
+   * Each tool is defined with its input schema and mapped to its implementation method.
+   */
   private setupToolHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
@@ -234,6 +261,11 @@ export class WordPressOrgMCPServer {
     });
   }
 
+  /**
+   * Handle search_plugins tool requests.
+   * @param args - Tool arguments containing query string and optional limit
+   * @returns MCP response with JSON array of matching plugins
+   */
   private async handleSearchPlugins(args: any) {
     const { query, limit = 10 } = args;
     const plugins = await this.api.searchPlugins(query, limit);
@@ -248,6 +280,12 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle get_plugin_info tool requests.
+   * @param args - Tool arguments containing plugin slug
+   * @returns MCP response with detailed plugin information
+   * @throws McpError if plugin is not found
+   */
   private async handleGetPluginInfo(args: any) {
     const { slug } = args;
     const info = await this.api.getPluginInfo(slug);
@@ -266,6 +304,12 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle download_plugin tool requests.
+   * @param args - Tool arguments containing plugin slug and optional version
+   * @returns MCP response with the path where plugin was downloaded
+   * @throws McpError if download fails
+   */
   private async handleDownloadPlugin(args: any) {
     const { slug, version = 'latest' } = args;
     const filePath = await this.api.downloadPlugin(slug, version);
@@ -284,6 +328,12 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle extract_plugin tool requests.
+   * @param args - Tool arguments containing plugin slug and optional zip_path
+   * @returns MCP response with extraction path and file count
+   * @throws McpError if extraction fails or ZIP file not found
+   */
   private async handleExtractPlugin(args: any) {
     const { slug, zip_path } = args;
     let zipPath = zip_path;
@@ -311,6 +361,11 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle list_plugin_files tool requests.
+   * @param args - Tool arguments containing plugin slug and optional file extension filter
+   * @returns MCP response with newline-separated list of plugin files
+   */
   private async handleListPluginFiles(args: any) {
     const { slug, extension } = args;
     const extractPath = path.join(this.extractor.extractDir, slug);
@@ -328,6 +383,12 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle read_plugin_file tool requests.
+   * @param args - Tool arguments containing plugin slug and file path
+   * @returns MCP response with file contents
+   * @throws McpError if file is not found
+   */
   private async handleReadPluginFile(args: any) {
     const { slug, file_path } = args;
     const extractPath = path.join(this.extractor.extractDir, slug);
@@ -348,6 +409,13 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Handle compare_plugins tool requests.
+   * Compares a local plugin directory with a WordPress.org plugin version.
+   * @param args - Tool arguments containing local_path, wp_org_slug, and optional format
+   * @returns MCP response with comparison results (summary or detailed JSON)
+   * @throws McpError if download or extraction fails
+   */
   private async handleComparePlugins(args: any) {
     const { local_path, wp_org_slug, format = 'summary' } = args;
 
@@ -385,6 +453,13 @@ export class WordPressOrgMCPServer {
     }
   }
 
+  /**
+   * Handle get_file_diff tool requests.
+   * Gets a detailed diff for a specific file between local and WordPress.org versions.
+   * @param args - Tool arguments containing local_path, wp_org_slug, and file_path
+   * @returns MCP response with file diff or status message
+   * @throws McpError if download, extraction, or file comparison fails
+   */
   private async handleGetFileDiff(args: any) {
     const { local_path, wp_org_slug, file_path } = args;
 
@@ -416,6 +491,11 @@ export class WordPressOrgMCPServer {
     };
   }
 
+  /**
+   * Start the MCP server and listen for incoming requests on stdio.
+   * This method establishes the stdio transport connection and begins processing MCP requests.
+   * @throws Error if server fails to start
+   */
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
