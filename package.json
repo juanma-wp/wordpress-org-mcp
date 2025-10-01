@@ -15,9 +15,12 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "lint": "echo 'No linting configured'",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test": "npm run test:unit",
+    "test:unit": "jest tests --testPathIgnorePatterns=tests/integration",
+    "test:integration": "npm run build && NODE_OPTIONS=\"--experimental-vm-modules\" jest tests/integration --testTimeout=60000",
+    "test:all": "npm run test:unit && npm run test:integration",
+    "test:watch": "jest --watch tests --testPathIgnorePatterns=tests/integration",
+    "test:coverage": "jest --coverage tests --testPathIgnorePatterns=tests/integration"
   },
   "keywords": ["mcp", "wordpress", "plugin", "analysis"],
   "author": "Your Name",

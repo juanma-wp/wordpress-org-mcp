@@ -6,12 +6,15 @@ export default {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(@modelcontextprotocol|node-fetch|yauzl)/)',
+    'node_modules/(?!@modelcontextprotocol)',
   ],
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
   transform: {
-    '^.+\\.ts$': ['ts-jest', { useESM: true }],
+    '^.+\\.ts$': ['ts-jest', {
+      useESM: true,
+      tsconfig: 'tsconfig.test.json'
+    }],
   },
   collectCoverageFrom: [
     'src/**/*.ts',
