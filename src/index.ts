@@ -11,6 +11,7 @@ import {
 import { WordPressOrgAPI } from './wordpress-api.js';
 import { PluginExtractor } from './plugin-extractor.js';
 import { PluginComparator } from './plugin-comparator.js';
+import { RepositoryExtractor } from './repository-extractor.js';
 import * as path from 'path';
 
 /**
@@ -36,6 +37,8 @@ export class WordPressOrgMCPServer {
   private extractor: PluginExtractor;
   /** Plugin comparison utility for generating diffs */
   private comparator: PluginComparator;
+  /** Repository extraction and download utility */
+  private repositoryExtractor: RepositoryExtractor;
 
   /**
    * Initialize the WordPress.org MCP server with all required components.
@@ -61,6 +64,9 @@ export class WordPressOrgMCPServer {
     this.api = new WordPressOrgAPI(customCacheDir);
     this.extractor = new PluginExtractor(customExtractDir);
     this.comparator = new PluginComparator();
+    this.repositoryExtractor = new RepositoryExtractor(
+      process.env.WP_MCP_REPO_DIR
+    );
 
     this.setupToolHandlers();
   }
@@ -224,6 +230,89 @@ export class WordPressOrgMCPServer {
             },
             required: ['local_path', 'wp_org_slug', 'file_path']
           }
+        },
+        {
+          name: 'find_repository_url',
+          description: 'Find the source code repository URL for a WordPress plugin',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              slug: {
+                type: 'string',
+                description: 'Plugin slug to find repository for'
+              }
+            },
+            required: ['slug']
+          }
+        },
+        {
+          name: 'download_from_repository',
+          description: 'Download plugin source code from its repository (GitHub, GitLab, etc.)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              slug: {
+                type: 'string',
+                description: 'Plugin slug'
+              },
+              method: {
+                type: 'string',
+                enum: ['git', 'http'],
+                description: 'Download method (default: "git")',
+                default: 'git'
+              }
+            },
+            required: ['slug']
+          }
+        },
+        {
+          name: 'compare_with_repository',
+          description: 'Compare WordPress.org plugin with its original repository, including all code files (PHP, JS, CSS)',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              slug: {
+                type: 'string',
+                description: 'Plugin slug to compare'
+              },
+              format: {
+                type: 'string',
+                enum: ['summary', 'detailed', 'code-focused'],
+                description: 'Output format - "summary" for overview, "detailed" for full comparison, "code-focused" for PHP/JS/CSS analysis (default: "code-focused")',
+                default: 'code-focused'
+              }
+            },
+            required: ['slug']
+          }
+        },
+        {
+          name: 'compare_local_with_source',
+          description: 'Compare your local plugin with its original repository (if available) or WordPress.org version as fallback',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              local_path: {
+                type: 'string',
+                description: 'Path to your local plugin directory'
+              },
+              wp_org_slug: {
+                type: 'string',
+                description: 'WordPress.org plugin slug to use as reference'
+              },
+              prefer_repo: {
+                type: 'boolean',
+                description: 'Prefer repository over WordPress.org when both are available (default: true)',
+                default: true
+              },
+              format: {
+                type: 'string',
+                enum: ['summary', 'detailed', 'code-focused'],
+                description: 'Output format (default: "code-focused")',
+                default: 'code-focused'
+              }
+            },
+            required: ['local_path', 'wp_org_slug']
+          }
         }
       ]
     }));
@@ -249,6 +338,14 @@ export class WordPressOrgMCPServer {
             return await this.handleComparePlugins(args);
           case 'get_file_diff':
             return await this.handleGetFileDiff(args);
+          case 'find_repository_url':
+            return await this.handleFindRepositoryUrl(args);
+          case 'download_from_repository':
+            return await this.handleDownloadFromRepository(args);
+          case 'compare_with_repository':
+            return await this.handleCompareWithRepository(args);
+          case 'compare_local_with_source':
+            return await this.handleCompareLocalWithSource(args);
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
@@ -486,6 +583,622 @@ export class WordPressOrgMCPServer {
         {
           type: 'text' as const,
           text: fileComparison.diff || `File ${file_path} is ${fileComparison.status}`
+        }
+      ]
+    };
+  }
+
+  /**
+   * Handle find_repository_url tool requests.
+   * Finds the source code repository URL for a WordPress plugin.
+   * @param args - Tool arguments containing plugin slug
+   * @returns MCP response with repository information
+   */
+  private async handleFindRepositoryUrl(args: any) {
+    const { slug } = args;
+
+    // First download and extract the plugin
+    const zipPath = await this.api.downloadPlugin(slug);
+    if (!zipPath) {
+      throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${slug}`);
+    }
+
+    const extracted = await this.extractor.extractPlugin(zipPath, slug);
+    if (!extracted) {
+      throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${slug}`);
+    }
+
+    // Find repository URL
+    const repoInfo = await this.repositoryExtractor.findRepositoryUrl(extracted);
+
+    if (!repoInfo) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `No repository URL found for plugin: ${slug}\n\nThe plugin might not have a public repository, or it may not be referenced in the plugin files.`
+          }
+        ]
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(repoInfo, null, 2)
+        }
+      ]
+    };
+  }
+
+  /**
+   * Handle download_from_repository tool requests.
+   * Downloads plugin source code from its repository.
+   * @param args - Tool arguments containing plugin slug and download method
+   * @returns MCP response with download information
+   */
+  private async handleDownloadFromRepository(args: any) {
+    const { slug, method = 'git' } = args;
+
+    // First find the repository URL
+    const zipPath = await this.api.downloadPlugin(slug);
+    if (!zipPath) {
+      throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${slug}`);
+    }
+
+    const extracted = await this.extractor.extractPlugin(zipPath, slug);
+    if (!extracted) {
+      throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${slug}`);
+    }
+
+    const repoInfo = await this.repositoryExtractor.findRepositoryUrl(extracted);
+    if (!repoInfo) {
+      throw new McpError(ErrorCode.InvalidRequest, `No repository found for plugin: ${slug}`);
+    }
+
+    // Download from repository
+    let repoDownload;
+    try {
+      if (method === 'http') {
+        repoDownload = await this.repositoryExtractor.downloadRepositoryViaHttp(repoInfo, slug);
+      } else {
+        repoDownload = await this.repositoryExtractor.downloadRepository(repoInfo, slug);
+      }
+    } catch (error: any) {
+      // Try HTTP method as fallback
+      if (method === 'git') {
+        try {
+          repoDownload = await this.repositoryExtractor.downloadRepositoryViaHttp(repoInfo, slug);
+        } catch {
+          throw new McpError(ErrorCode.InternalError, `Failed to download repository: ${error.message}`);
+        }
+      } else {
+        throw new McpError(ErrorCode.InternalError, `Failed to download repository: ${error.message}`);
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Repository downloaded successfully!\n\nRepository: ${repoInfo.url}\nType: ${repoInfo.type}\nPath: ${repoDownload.path}\nFiles: ${repoDownload.files.length}\n\nBranch: ${repoInfo.branch || 'default'}`
+        }
+      ]
+    };
+  }
+
+  /**
+   * Handle compare_with_repository tool requests.
+   * Compares WordPress.org plugin with its original repository.
+   * @param args - Tool arguments containing plugin slug and format
+   * @returns MCP response with comparison results
+   */
+  private async handleCompareWithRepository(args: any) {
+    const { slug, format = 'code-focused' } = args;
+
+    // Download and extract WordPress.org version
+    const zipPath = await this.api.downloadPlugin(slug);
+    if (!zipPath) {
+      throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${slug}`);
+    }
+
+    const extracted = await this.extractor.extractPlugin(zipPath, slug);
+    if (!extracted) {
+      throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${slug}`);
+    }
+
+    // Find and download repository
+    const repoInfo = await this.repositoryExtractor.findRepositoryUrl(extracted);
+    if (!repoInfo) {
+      throw new McpError(ErrorCode.InvalidRequest, `No repository found for plugin: ${slug}`);
+    }
+
+    let repoDownload;
+    try {
+      repoDownload = await this.repositoryExtractor.downloadRepository(repoInfo, slug);
+    } catch {
+      // Try HTTP method as fallback
+      try {
+        repoDownload = await this.repositoryExtractor.downloadRepositoryViaHttp(repoInfo, slug);
+      } catch (error: any) {
+        throw new McpError(ErrorCode.InternalError, `Failed to download repository: ${error.message}`);
+      }
+    }
+
+    // Compare WordPress.org version with repository
+    const wpOrgComparison = await this.comparator.comparePlugins(extracted.extractPath, repoDownload.path);
+
+    // Categorize files by type
+    const codeFiles = {
+      php: { wpOnly: [] as string[], repoOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      js: { wpOnly: [] as string[], repoOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      css: { wpOnly: [] as string[], repoOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      other: { wpOnly: [] as string[], repoOnly: [] as string[], different: [] as string[], identical: [] as string[] }
+    };
+
+    // Categorize all files
+    for (const file of wpOrgComparison.files) {
+      let category: keyof typeof codeFiles;
+      if (file.file.endsWith('.php')) {
+        category = 'php';
+      } else if (file.file.endsWith('.js') || file.file.endsWith('.jsx') || file.file.endsWith('.ts') || file.file.endsWith('.tsx')) {
+        category = 'js';
+      } else if (file.file.endsWith('.css') || file.file.endsWith('.scss') || file.file.endsWith('.sass') || file.file.endsWith('.less')) {
+        category = 'css';
+      } else {
+        category = 'other';
+      }
+
+      if (file.status === 'local_only') {
+        codeFiles[category].wpOnly.push(file.file);
+      } else if (file.status === 'remote_only') {
+        codeFiles[category].repoOnly.push(file.file);
+      } else if (file.status === 'different') {
+        codeFiles[category].different.push(file.file);
+      } else if (file.status === 'identical') {
+        codeFiles[category].identical.push(file.file);
+      }
+    }
+
+    // Build response based on format
+    let output = `Comparison: WordPress.org vs Repository\n`;
+    output += `========================================\n\n`;
+    output += `Plugin: ${slug}\n`;
+    output += `Repository: ${repoInfo.url}\n`;
+    output += `Repository Type: ${repoInfo.type}\n\n`;
+
+    if (format === 'summary') {
+      output += `Overall Summary:\n`;
+      output += `----------------\n`;
+      output += `- Identical files: ${wpOrgComparison.summary.identical}\n`;
+      output += `- Different files: ${wpOrgComparison.summary.different}\n`;
+      output += `- WordPress.org only: ${wpOrgComparison.summary.localOnly}\n`;
+      output += `- Repository only: ${wpOrgComparison.summary.remoteOnly}\n`;
+      output += `- Total files: ${wpOrgComparison.summary.total}\n`;
+
+    } else if (format === 'code-focused' || format === 'detailed') {
+      // PHP Files Analysis
+      output += `PHP Files Analysis:\n`;
+      output += `------------------\n`;
+      output += `- Identical: ${codeFiles.php.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.php.different.length} files\n`;
+      output += `- WordPress.org only: ${codeFiles.php.wpOnly.length} files\n`;
+      output += `- Repository only: ${codeFiles.php.repoOnly.length} files\n\n`;
+
+      if (codeFiles.php.different.length > 0 && (format === 'detailed' || codeFiles.php.different.length <= 10)) {
+        output += `Modified PHP files:\n`;
+        codeFiles.php.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.php.wpOnly.length > 0 && (format === 'detailed' || codeFiles.php.wpOnly.length <= 10)) {
+        output += `PHP files only in WordPress.org:\n`;
+        codeFiles.php.wpOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.php.repoOnly.length > 0 && (format === 'detailed' || codeFiles.php.repoOnly.length <= 10)) {
+        output += `PHP files only in Repository:\n`;
+        codeFiles.php.repoOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // JavaScript Files Analysis
+      output += `JavaScript Files Analysis:\n`;
+      output += `-------------------------\n`;
+      output += `- Identical: ${codeFiles.js.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.js.different.length} files\n`;
+      output += `- WordPress.org only: ${codeFiles.js.wpOnly.length} files\n`;
+      output += `- Repository only: ${codeFiles.js.repoOnly.length} files\n\n`;
+
+      // Check for minified files
+      const minifiedJs = codeFiles.js.wpOnly.filter(f => f.includes('.min.js') || f.includes('-min.js'));
+      if (minifiedJs.length > 0) {
+        output += `  ⚠️  ${minifiedJs.length} minified JS files found only in WordPress.org version\n\n`;
+      }
+
+      if (codeFiles.js.different.length > 0 && (format === 'detailed' || codeFiles.js.different.length <= 10)) {
+        output += `Modified JS files:\n`;
+        codeFiles.js.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.js.wpOnly.length > 0 && (format === 'detailed' || codeFiles.js.wpOnly.length <= 10)) {
+        output += `JS files only in WordPress.org:\n`;
+        codeFiles.js.wpOnly.forEach(f => {
+          const isMinified = f.includes('.min.') || f.includes('-min.');
+          output += `  • ${f}${isMinified ? ' (minified)' : ''}\n`;
+        });
+        output += `\n`;
+      }
+
+      if (codeFiles.js.repoOnly.length > 0 && (format === 'detailed' || codeFiles.js.repoOnly.length <= 10)) {
+        output += `JS files only in Repository:\n`;
+        codeFiles.js.repoOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // CSS Files Analysis
+      output += `CSS Files Analysis:\n`;
+      output += `------------------\n`;
+      output += `- Identical: ${codeFiles.css.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.css.different.length} files\n`;
+      output += `- WordPress.org only: ${codeFiles.css.wpOnly.length} files\n`;
+      output += `- Repository only: ${codeFiles.css.repoOnly.length} files\n\n`;
+
+      // Check for minified CSS
+      const minifiedCss = codeFiles.css.wpOnly.filter(f => f.includes('.min.css') || f.includes('-min.css'));
+      if (minifiedCss.length > 0) {
+        output += `  ⚠️  ${minifiedCss.length} minified CSS files found only in WordPress.org version\n\n`;
+      }
+
+      if (codeFiles.css.different.length > 0 && (format === 'detailed' || codeFiles.css.different.length <= 10)) {
+        output += `Modified CSS files:\n`;
+        codeFiles.css.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.css.wpOnly.length > 0 && (format === 'detailed' || codeFiles.css.wpOnly.length <= 10)) {
+        output += `CSS files only in WordPress.org:\n`;
+        codeFiles.css.wpOnly.forEach(f => {
+          const isMinified = f.includes('.min.') || f.includes('-min.');
+          output += `  • ${f}${isMinified ? ' (minified)' : ''}\n`;
+        });
+        output += `\n`;
+      }
+
+      if (codeFiles.css.repoOnly.length > 0 && (format === 'detailed' || codeFiles.css.repoOnly.length <= 10)) {
+        output += `CSS files only in Repository:\n`;
+        codeFiles.css.repoOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // Summary insights
+      output += `Key Insights:\n`;
+      output += `-------------\n`;
+
+      const totalCodeFiles = codeFiles.php.identical.length + codeFiles.php.different.length +
+                            codeFiles.php.wpOnly.length + codeFiles.php.repoOnly.length +
+                            codeFiles.js.identical.length + codeFiles.js.different.length +
+                            codeFiles.js.wpOnly.length + codeFiles.js.repoOnly.length +
+                            codeFiles.css.identical.length + codeFiles.css.different.length +
+                            codeFiles.css.wpOnly.length + codeFiles.css.repoOnly.length;
+
+      const identicalCodeFiles = codeFiles.php.identical.length + codeFiles.js.identical.length + codeFiles.css.identical.length;
+      const modifiedCodeFiles = codeFiles.php.different.length + codeFiles.js.different.length + codeFiles.css.different.length;
+
+      output += `• Total code files analyzed: ${totalCodeFiles}\n`;
+      output += `• Code files identical: ${identicalCodeFiles} (${Math.round(identicalCodeFiles / totalCodeFiles * 100)}%)\n`;
+      output += `• Code files modified: ${modifiedCodeFiles} (${Math.round(modifiedCodeFiles / totalCodeFiles * 100)}%)\n`;
+
+      if (minifiedJs.length + minifiedCss.length > 0) {
+        output += `• Minified assets in WordPress.org: ${minifiedJs.length + minifiedCss.length} files\n`;
+      }
+
+      // Check for build artifacts
+      const buildArtifacts = wpOrgComparison.files.filter(f =>
+        f.status === 'local_only' &&
+        (f.file.includes('/dist/') || f.file.includes('/build/') || f.file.includes('/vendor/'))
+      );
+
+      if (buildArtifacts.length > 0) {
+        output += `• Build artifacts in WordPress.org: ${buildArtifacts.length} files\n`;
+      }
+
+      // Check for development files in repo
+      const devFiles = wpOrgComparison.files.filter(f =>
+        f.status === 'remote_only' &&
+        (f.file.includes('test') || f.file.includes('spec') || f.file.endsWith('.md') ||
+         f.file === '.gitignore' || f.file === '.eslintrc' || f.file === 'package.json' ||
+         f.file === 'composer.json' || f.file === 'webpack.config.js')
+      );
+
+      if (devFiles.length > 0) {
+        output += `• Development files in repository: ${devFiles.length} files\n`;
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: output
+        }
+      ]
+    };
+  }
+
+  /**
+   * Handle compare_local_with_source tool requests.
+   * Compares local plugin with original repository (preferred) or WordPress.org as fallback.
+   * @param args - Tool arguments containing local_path, wp_org_slug, prefer_repo, and format
+   * @returns MCP response with comparison results
+   */
+  private async handleCompareLocalWithSource(args: any) {
+    const { local_path, wp_org_slug, prefer_repo = true, format = 'code-focused' } = args;
+
+    // First, try to find the repository if prefer_repo is true
+    let sourcePath: string;
+    let sourceType: 'repository' | 'wordpress.org';
+    let repoInfo: any = null;
+
+    if (prefer_repo) {
+      try {
+        // Download WordPress.org version to extract repository info
+        const zipPath = await this.api.downloadPlugin(wp_org_slug);
+        if (zipPath) {
+          const extracted = await this.extractor.extractPlugin(zipPath, wp_org_slug);
+          if (extracted) {
+            repoInfo = await this.repositoryExtractor.findRepositoryUrl(extracted);
+
+            if (repoInfo) {
+              // Try to download from repository
+              try {
+                const repoDownload = await this.repositoryExtractor.downloadRepository(repoInfo, wp_org_slug);
+                sourcePath = repoDownload.path;
+                sourceType = 'repository';
+              } catch {
+                // Try HTTP download as fallback
+                try {
+                  const repoDownload = await this.repositoryExtractor.downloadRepositoryViaHttp(repoInfo, wp_org_slug);
+                  sourcePath = repoDownload.path;
+                  sourceType = 'repository';
+                } catch {
+                  // Repository download failed, fall back to WordPress.org
+                  sourcePath = extracted.extractPath;
+                  sourceType = 'wordpress.org';
+                  repoInfo = null;
+                }
+              }
+            } else {
+              // No repository found, use WordPress.org version
+              sourcePath = extracted.extractPath;
+              sourceType = 'wordpress.org';
+            }
+          } else {
+            throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${wp_org_slug}`);
+          }
+        } else {
+          throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${wp_org_slug}`);
+        }
+      } catch (error) {
+        if (error instanceof McpError) throw error;
+        // Fall back to WordPress.org only
+        const zipPath = await this.api.downloadPlugin(wp_org_slug);
+        if (!zipPath) {
+          throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${wp_org_slug}`);
+        }
+        const extracted = await this.extractor.extractPlugin(zipPath, wp_org_slug);
+        if (!extracted) {
+          throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${wp_org_slug}`);
+        }
+        sourcePath = extracted.extractPath;
+        sourceType = 'wordpress.org';
+      }
+    } else {
+      // User explicitly wants WordPress.org version
+      const zipPath = await this.api.downloadPlugin(wp_org_slug);
+      if (!zipPath) {
+        throw new McpError(ErrorCode.InvalidRequest, `Failed to download plugin: ${wp_org_slug}`);
+      }
+      const extracted = await this.extractor.extractPlugin(zipPath, wp_org_slug);
+      if (!extracted) {
+        throw new McpError(ErrorCode.InternalError, `Failed to extract plugin: ${wp_org_slug}`);
+      }
+      sourcePath = extracted.extractPath;
+      sourceType = 'wordpress.org';
+    }
+
+    // Now compare local plugin with the source
+    const comparison = await this.comparator.comparePlugins(local_path, sourcePath);
+
+    // Categorize files by type for code-focused analysis
+    const codeFiles = {
+      php: { localOnly: [] as string[], sourceOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      js: { localOnly: [] as string[], sourceOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      css: { localOnly: [] as string[], sourceOnly: [] as string[], different: [] as string[], identical: [] as string[] },
+      other: { localOnly: [] as string[], sourceOnly: [] as string[], different: [] as string[], identical: [] as string[] }
+    };
+
+    // Categorize all files
+    for (const file of comparison.files) {
+      let category: keyof typeof codeFiles;
+      if (file.file.endsWith('.php')) {
+        category = 'php';
+      } else if (file.file.endsWith('.js') || file.file.endsWith('.jsx') || file.file.endsWith('.ts') || file.file.endsWith('.tsx')) {
+        category = 'js';
+      } else if (file.file.endsWith('.css') || file.file.endsWith('.scss') || file.file.endsWith('.sass') || file.file.endsWith('.less')) {
+        category = 'css';
+      } else {
+        category = 'other';
+      }
+
+      if (file.status === 'local_only') {
+        codeFiles[category].localOnly.push(file.file);
+      } else if (file.status === 'remote_only') {
+        codeFiles[category].sourceOnly.push(file.file);
+      } else if (file.status === 'different') {
+        codeFiles[category].different.push(file.file);
+      } else if (file.status === 'identical') {
+        codeFiles[category].identical.push(file.file);
+      }
+    }
+
+    // Build response
+    let output = `Comparison: Local Plugin vs ${sourceType === 'repository' ? 'Original Repository' : 'WordPress.org'}\n`;
+    output += `${'='.repeat(60)}\n\n`;
+    output += `Local Plugin: ${local_path}\n`;
+    output += `Reference: ${wp_org_slug} (${sourceType})\n`;
+    if (repoInfo) {
+      output += `Repository: ${repoInfo.url}\n`;
+      output += `Repository Type: ${repoInfo.type}\n`;
+    }
+    output += `\n`;
+
+    if (format === 'summary') {
+      output += `Overall Summary:\n`;
+      output += `----------------\n`;
+      output += `- Identical files: ${comparison.summary.identical}\n`;
+      output += `- Different files: ${comparison.summary.different}\n`;
+      output += `- Local only: ${comparison.summary.localOnly}\n`;
+      output += `- ${sourceType === 'repository' ? 'Repository' : 'WordPress.org'} only: ${comparison.summary.remoteOnly}\n`;
+      output += `- Total files: ${comparison.summary.total}\n`;
+
+    } else if (format === 'code-focused' || format === 'detailed') {
+      // PHP Files Analysis
+      output += `PHP Files Analysis:\n`;
+      output += `------------------\n`;
+      output += `- Identical: ${codeFiles.php.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.php.different.length} files\n`;
+      output += `- Local only: ${codeFiles.php.localOnly.length} files\n`;
+      output += `- ${sourceType === 'repository' ? 'Repository' : 'WordPress.org'} only: ${codeFiles.php.sourceOnly.length} files\n\n`;
+
+      if (codeFiles.php.different.length > 0 && (format === 'detailed' || codeFiles.php.different.length <= 10)) {
+        output += `Modified PHP files:\n`;
+        codeFiles.php.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.php.localOnly.length > 0 && (format === 'detailed' || codeFiles.php.localOnly.length <= 10)) {
+        output += `PHP files only in your local plugin:\n`;
+        codeFiles.php.localOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.php.sourceOnly.length > 0 && (format === 'detailed' || codeFiles.php.sourceOnly.length <= 10)) {
+        output += `PHP files only in ${sourceType === 'repository' ? 'repository' : 'WordPress.org'}:\n`;
+        codeFiles.php.sourceOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // JavaScript Files Analysis
+      output += `JavaScript Files Analysis:\n`;
+      output += `-------------------------\n`;
+      output += `- Identical: ${codeFiles.js.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.js.different.length} files\n`;
+      output += `- Local only: ${codeFiles.js.localOnly.length} files\n`;
+      output += `- ${sourceType === 'repository' ? 'Repository' : 'WordPress.org'} only: ${codeFiles.js.sourceOnly.length} files\n\n`;
+
+      if (codeFiles.js.different.length > 0 && (format === 'detailed' || codeFiles.js.different.length <= 10)) {
+        output += `Modified JS files:\n`;
+        codeFiles.js.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.js.localOnly.length > 0 && (format === 'detailed' || codeFiles.js.localOnly.length <= 10)) {
+        output += `JS files only in your local plugin:\n`;
+        codeFiles.js.localOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.js.sourceOnly.length > 0 && (format === 'detailed' || codeFiles.js.sourceOnly.length <= 10)) {
+        output += `JS files only in ${sourceType === 'repository' ? 'repository' : 'WordPress.org'}:\n`;
+        codeFiles.js.sourceOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // CSS Files Analysis
+      output += `CSS Files Analysis:\n`;
+      output += `------------------\n`;
+      output += `- Identical: ${codeFiles.css.identical.length} files\n`;
+      output += `- Modified: ${codeFiles.css.different.length} files\n`;
+      output += `- Local only: ${codeFiles.css.localOnly.length} files\n`;
+      output += `- ${sourceType === 'repository' ? 'Repository' : 'WordPress.org'} only: ${codeFiles.css.sourceOnly.length} files\n\n`;
+
+      if (codeFiles.css.different.length > 0 && (format === 'detailed' || codeFiles.css.different.length <= 10)) {
+        output += `Modified CSS files:\n`;
+        codeFiles.css.different.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.css.localOnly.length > 0 && (format === 'detailed' || codeFiles.css.localOnly.length <= 10)) {
+        output += `CSS files only in your local plugin:\n`;
+        codeFiles.css.localOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      if (codeFiles.css.sourceOnly.length > 0 && (format === 'detailed' || codeFiles.css.sourceOnly.length <= 10)) {
+        output += `CSS files only in ${sourceType === 'repository' ? 'repository' : 'WordPress.org'}:\n`;
+        codeFiles.css.sourceOnly.forEach(f => output += `  • ${f}\n`);
+        output += `\n`;
+      }
+
+      // Summary insights
+      output += `Key Insights:\n`;
+      output += `-------------\n`;
+
+      const totalCodeFiles = codeFiles.php.identical.length + codeFiles.php.different.length +
+                            codeFiles.php.localOnly.length + codeFiles.php.sourceOnly.length +
+                            codeFiles.js.identical.length + codeFiles.js.different.length +
+                            codeFiles.js.localOnly.length + codeFiles.js.sourceOnly.length +
+                            codeFiles.css.identical.length + codeFiles.css.different.length +
+                            codeFiles.css.localOnly.length + codeFiles.css.sourceOnly.length;
+
+      const identicalCodeFiles = codeFiles.php.identical.length + codeFiles.js.identical.length + codeFiles.css.identical.length;
+      const modifiedCodeFiles = codeFiles.php.different.length + codeFiles.js.different.length + codeFiles.css.different.length;
+
+      output += `• Total code files analyzed: ${totalCodeFiles}\n`;
+      if (totalCodeFiles > 0) {
+        output += `• Code files identical: ${identicalCodeFiles} (${Math.round(identicalCodeFiles / totalCodeFiles * 100)}%)\n`;
+        output += `• Code files modified: ${modifiedCodeFiles} (${Math.round(modifiedCodeFiles / totalCodeFiles * 100)}%)\n`;
+      }
+
+      if (sourceType === 'repository') {
+        output += `• Using original repository as source of truth\n`;
+
+        // Check for features added in local version
+        const newFeatures = codeFiles.php.localOnly.length + codeFiles.js.localOnly.length + codeFiles.css.localOnly.length;
+        if (newFeatures > 0) {
+          output += `• New features in your plugin: ${newFeatures} code files added\n`;
+        }
+
+        // Check for missing features
+        const missingFeatures = codeFiles.php.sourceOnly.length + codeFiles.js.sourceOnly.length + codeFiles.css.sourceOnly.length;
+        if (missingFeatures > 0) {
+          output += `• Features from original not in your plugin: ${missingFeatures} code files\n`;
+        }
+      } else {
+        output += `• Using WordPress.org version (no repository found)\n`;
+        output += `• Note: This may include minified/built files not in the original source\n`;
+      }
+
+      // Provide recommendation
+      output += `\nRecommendation:\n`;
+      output += `---------------\n`;
+      if (modifiedCodeFiles > 0) {
+        output += `Your plugin has ${modifiedCodeFiles} modified code files compared to the ${sourceType === 'repository' ? 'original repository' : 'WordPress.org version'}.\n`;
+        output += `Use 'get_file_diff' to examine specific file differences.\n`;
+      } else if (identicalCodeFiles === totalCodeFiles && totalCodeFiles > 0) {
+        output += `Your plugin code is identical to the ${sourceType === 'repository' ? 'original repository' : 'WordPress.org version'}.\n`;
+      }
+    }
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: output
         }
       ]
     };

@@ -214,6 +214,91 @@ export class PluginComparator {
   }
 
   /**
+   * Compare specific file types between two plugin directories.
+   * Provides detailed comparison for JavaScript and CSS files.
+   * @param localPluginPath - Absolute path to the local plugin directory
+   * @param remotePluginPath - Absolute path to the remote plugin directory
+   * @param fileTypes - Array of file extensions to compare (e.g., ['.js', '.css'])
+   * @returns Comparison result filtered by file types with additional analysis
+   */
+  async compareAssetFiles(
+    localPluginPath: string,
+    remotePluginPath: string,
+    fileTypes: string[] = ['.js', '.css']
+  ): Promise<{
+    comparison: PluginComparison;
+    analysis: {
+      minified: { local: string[]; remote: string[] };
+      sourceMaps: { local: string[]; remote: string[] };
+      buildArtifacts: { local: string[]; remote: string[] };
+      originalSources: { local: string[]; remote: string[] };
+    };
+  }> {
+    // Get full comparison
+    const comparison = await this.comparePlugins(localPluginPath, remotePluginPath);
+
+    // Filter for requested file types
+    const filteredFiles = comparison.files.filter(f =>
+      fileTypes.some(ext => f.file.endsWith(ext))
+    );
+
+    // Analyze the files
+    const analysis = {
+      minified: { local: [] as string[], remote: [] as string[] },
+      sourceMaps: { local: [] as string[], remote: [] as string[] },
+      buildArtifacts: { local: [] as string[], remote: [] as string[] },
+      originalSources: { local: [] as string[], remote: [] as string[] }
+    };
+
+    for (const file of filteredFiles) {
+      const isMinified = file.file.includes('.min.') || file.file.includes('-min.');
+      const isSourceMap = file.file.endsWith('.map');
+      const isBuildArtifact = file.file.includes('/dist/') || file.file.includes('/build/') ||
+                             file.file.includes('/assets/') || file.file.includes('/public/');
+
+      if (file.status === 'local_only') {
+        if (isMinified) {
+          analysis.minified.local.push(file.file);
+        } else if (isSourceMap) {
+          analysis.sourceMaps.local.push(file.file);
+        } else if (isBuildArtifact) {
+          analysis.buildArtifacts.local.push(file.file);
+        } else {
+          analysis.originalSources.local.push(file.file);
+        }
+      } else if (file.status === 'remote_only') {
+        if (isMinified) {
+          analysis.minified.remote.push(file.file);
+        } else if (isSourceMap) {
+          analysis.sourceMaps.remote.push(file.file);
+        } else if (isBuildArtifact) {
+          analysis.buildArtifacts.remote.push(file.file);
+        } else {
+          analysis.originalSources.remote.push(file.file);
+        }
+      }
+    }
+
+    // Update comparison with filtered files
+    const filteredComparison: PluginComparison = {
+      ...comparison,
+      files: filteredFiles,
+      summary: {
+        identical: filteredFiles.filter(f => f.status === 'identical').length,
+        different: filteredFiles.filter(f => f.status === 'different').length,
+        localOnly: filteredFiles.filter(f => f.status === 'local_only').length,
+        remoteOnly: filteredFiles.filter(f => f.status === 'remote_only').length,
+        total: filteredFiles.length
+      }
+    };
+
+    return {
+      comparison: filteredComparison,
+      analysis
+    };
+  }
+
+  /**
    * Format a plugin comparison result into a human-readable summary report.
    * Creates a nicely formatted text report with statistics and file listings.
    * @param comparison - The plugin comparison result to format
