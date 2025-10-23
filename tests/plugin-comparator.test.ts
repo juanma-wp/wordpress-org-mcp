@@ -127,9 +127,7 @@ describe('PluginComparator', () => {
       await fs.writeFile(path.join(localPath, 'includes', 'helper.php'), 'local helper');
       await fs.writeFile(path.join(remotePath, 'includes', 'helper.php'), 'remote helper');
 
-      await fs.mkdir(path.join(localPath, 'assets'), { recursive: true });
       await fs.writeFile(path.join(localPath, 'assets', 'style.css'), 'local only');
-      await fs.mkdir(path.join(remotePath, 'lib'), { recursive: true });
       await fs.writeFile(path.join(remotePath, 'lib', 'library.php'), 'remote only');
 
       const comparison = await comparator.comparePlugins(localPath, remotePath);
