@@ -18,7 +18,49 @@ npm run build
 
 This creates the compiled files in the `dist/` directory.
 
-## Step 2: Configure Claude Desktop
+## Step 2: Configure Your MCP Server
+
+You have two options for configuring your MCP server locally:
+
+### Option A: Using Claude CLI (Recommended)
+
+The Claude CLI provides a simpler way to add MCP servers with different scopes:
+
+#### For Project-Specific Configuration (Shareable via Git)
+```bash
+claude mcp add --scope project --transport stdio wordpress-org node /absolute/path/to/your/project/dist/index.js
+```
+This creates a `.mcp.json` file in your project root that can be committed to version control.
+
+#### For Local-Only Configuration (Not Shared)
+```bash
+claude mcp add --scope local --transport stdio wordpress-org node /absolute/path/to/your/project/dist/index.js
+```
+This stores the configuration in the `.claude/` directory (machine-specific, not shared via git).
+
+#### For User-Wide Configuration (All Projects)
+```bash
+claude mcp add --scope user --transport stdio wordpress-org node /absolute/path/to/your/project/dist/index.js
+```
+
+**Other Useful CLI Commands:**
+```bash
+# List all configured MCP servers
+claude mcp list
+
+# Get details about a specific server
+claude mcp get wordpress-org
+
+# Remove an MCP server
+claude mcp remove wordpress-org
+
+# Reset project-scoped approvals
+claude mcp reset-project-choices
+```
+
+**Note**: Replace `/absolute/path/to/your/project` with the actual full path to your MCP server directory.
+
+### Option B: Manual Configuration (Claude Desktop)
 
 Claude Desktop looks for MCP servers in its configuration file. The location varies by platform:
 
@@ -26,7 +68,7 @@ Claude Desktop looks for MCP servers in its configuration file. The location var
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 - **Linux**: `~/.config/Claude/claude_desktop_config.json`
 
-### Create or Edit the Configuration
+#### Create or Edit the Configuration
 
 1. Open the configuration file (create it if it doesn't exist)
 2. Add your local MCP server configuration:
@@ -45,7 +87,7 @@ Claude Desktop looks for MCP servers in its configuration file. The location var
 
 **Important**: Replace `/absolute/path/to/your/project` with the actual full path to your MCP server directory.
 
-### Example Configuration (macOS)
+#### Example Configuration (macOS)
 
 ```json
 {
@@ -59,9 +101,11 @@ Claude Desktop looks for MCP servers in its configuration file. The location var
 }
 ```
 
-## Step 3: Restart Claude Desktop
+## Step 3: Restart Claude Desktop (Option B only)
 
-After saving the configuration:
+If you used the CLI method (Option A), the changes take effect immediately in new conversations.
+
+If you manually edited the configuration file (Option B):
 
 1. Completely quit Claude Desktop (not just close the window)
 2. Restart Claude Desktop

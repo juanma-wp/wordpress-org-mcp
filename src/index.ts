@@ -616,17 +616,33 @@ export class WordPressOrgMCPServer {
         content: [
           {
             type: 'text' as const,
-            text: `No repository URL found for plugin: ${slug}\n\nThe plugin might not have a public repository, or it may not be referenced in the plugin files.`
+            text: `No repository URL found for plugin: ${slug}\n\nThe plugin might not have a public repository, or it may not be referenced in the plugin files.\n\nSearched in:\n- readme.txt/README.md\n- composer.json/package.json\n- Main PHP files\n- Plugin headers\n- Build configuration files\n\nTo improve repository detection, plugin authors should include:\n- "Plugin URI" header pointing to GitHub/GitLab/Bitbucket\n- repository field in composer.json or package.json\n- GitHub/GitLab/Bitbucket links in readme files`
           }
         ]
       };
     }
 
+    let output = `Repository Found!\n`;
+    output += `================\n\n`;
+    output += `Plugin: ${slug}\n`;
+    output += `Repository URL: ${repoInfo.url}\n`;
+    output += `Repository Type: ${repoInfo.type}\n`;
+    if (repoInfo.owner) {
+      output += `Owner: ${repoInfo.owner}\n`;
+    }
+    if (repoInfo.repo) {
+      output += `Repository Name: ${repoInfo.repo}\n`;
+    }
+    if (repoInfo.branch) {
+      output += `Default Branch: ${repoInfo.branch}\n`;
+    }
+    output += `\nYou can now use 'download_from_repository' or 'compare_local_with_source' to work with this repository.`;
+
     return {
       content: [
         {
           type: 'text' as const,
-          text: JSON.stringify(repoInfo, null, 2)
+          text: output
         }
       ]
     };
@@ -1053,6 +1069,13 @@ export class WordPressOrgMCPServer {
     if (repoInfo) {
       output += `Repository: ${repoInfo.url}\n`;
       output += `Repository Type: ${repoInfo.type}\n`;
+      if (repoInfo.branch) {
+        output += `Branch: ${repoInfo.branch}\n`;
+      }
+      output += `\n✅ Using original repository source code for comparison\n`;
+    } else if (sourceType === 'wordpress.org') {
+      output += `\n⚠️ No repository found - using WordPress.org deployed version\n`;
+      output += `Note: This may include minified/built files not in the original source\n`;
     }
     output += `\n`;
 

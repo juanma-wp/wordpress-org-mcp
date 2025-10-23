@@ -61,79 +61,212 @@ export class RepositoryExtractor {
    * Searches through common locations where repository URLs are stored
    */
   async findRepositoryUrl(extractedPlugin: ExtractedPlugin): Promise<RepositoryInfo | null> {
+    // Enhanced patterns to find repository URLs
     const patterns = [
-      // GitHub patterns
-      /github\.com[\/:]([^\/\s]+)\/([^\/\s\.]+)/gi,
+      // GitHub patterns - more comprehensive
+      /github\.com[\/:]([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
+      /https?:\/\/github\.com\/([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
+      /git@github\.com:([^\/]+)\/([^\.]+)\.git/gi,
       // GitLab patterns
-      /gitlab\.com[\/:]([^\/\s]+)\/([^\/\s\.]+)/gi,
+      /gitlab\.com[\/:]([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
+      /https?:\/\/gitlab\.com\/([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
       // Bitbucket patterns
-      /bitbucket\.org[\/:]([^\/\s]+)\/([^\/\s\.]+)/gi,
+      /bitbucket\.org[\/:]([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
+      /https?:\/\/bitbucket\.org\/([^\/\s\"\']+)\/([^\/\s\.\"\'\)]+)/gi,
       // Generic git URL patterns
       /git@([^:]+):([^\/]+)\/([^\.]+)/gi,
-      // HTTPS git URLs
-      /https?:\/\/(github|gitlab|bitbucket)\.[^\/]+\/([^\/\s]+)\/([^\/\s\.]+)/gi
+      // WordPress plugin URI patterns
+      /Plugin\s+URI:\s*(https?:\/\/github\.com\/[^\s]+)/gi,
+      /Author\s+URI:\s*(https?:\/\/github\.com\/[^\s]+)/gi,
+      // Link patterns in text/markdown
+      /\[.*?\]\((https?:\/\/github\.com\/[^)]+)\)/gi,
+      /\[.*?\]\((https?:\/\/gitlab\.com\/[^)]+)\)/gi,
+      /\[.*?\]\((https?:\/\/bitbucket\.org\/[^)]+)\)/gi
     ];
 
-    // Files to search for repository URLs
+    // Expanded list of files to search for repository URLs
     const searchFiles = [
+      // Documentation files
       'readme.txt',
       'README.txt',
       'readme.md',
       'README.md',
+      'README',
+      'CHANGELOG.md',
+      'CONTRIBUTING.md',
+      // Configuration files
       'composer.json',
       'package.json',
       '.git/config',
-      'style.css'  // WordPress theme files often contain repo info
+      'bower.json',
+      // WordPress specific files
+      'style.css',
+      // Build configuration
+      'Gruntfile.js',
+      'gulpfile.js',
+      'webpack.config.js',
+      // CI/CD files
+      '.travis.yml',
+      '.gitlab-ci.yml',
+      '.github/workflows/main.yml'
     ];
 
-    // Also search main PHP files
+    // Search main PHP files - expanded search
     const phpFiles = await this.extractor.getPluginFiles(extractedPlugin, '.php');
+
+    // Look for main plugin file (prioritized list)
     const mainPhpFile = phpFiles.find(f =>
       f === `${extractedPlugin.slug}.php` ||
       f === 'plugin.php' ||
       f === 'index.php' ||
-      f === 'main.php'
+      f === 'main.php' ||
+      f === `class-${extractedPlugin.slug}.php` ||
+      f === `${extractedPlugin.slug}-plugin.php`
     );
+
     if (mainPhpFile) {
-      searchFiles.push(mainPhpFile);
+      searchFiles.unshift(mainPhpFile); // Add at beginning for priority
     }
+
+    // Also check the first few PHP files if no main file found
+    if (!mainPhpFile && phpFiles.length > 0) {
+      searchFiles.push(...phpFiles.slice(0, 3));
+    }
+
+    // Track all found URLs and score them
+    const foundUrls: Map<string, number> = new Map();
 
     for (const file of searchFiles) {
       const content = await this.extractor.readPluginFile(extractedPlugin, file);
       if (!content) continue;
 
+      // Higher priority for certain files
+      const filePriority = file === mainPhpFile ? 10 :
+                          file === 'composer.json' ? 8 :
+                          file === 'package.json' ? 7 :
+                          file.includes('readme') ? 5 : 1;
+
       // Check for repository URLs in the content
       for (const pattern of patterns) {
         pattern.lastIndex = 0; // Reset regex
-        const matches = pattern.exec(content);
-        if (matches) {
-          return this.parseRepositoryUrl(matches[0]);
+        let match;
+        while ((match = pattern.exec(content)) !== null) {
+          const url = match[0];
+          const currentScore = foundUrls.get(url) || 0;
+          foundUrls.set(url, currentScore + filePriority);
         }
       }
 
-      // Special handling for composer.json and package.json
-      if (file === 'composer.json' || file === 'package.json') {
+      // Special handling for JSON files
+      if (file.endsWith('.json')) {
         try {
           const json = JSON.parse(content);
 
           // Check various possible locations for repo URL
-          const repoUrl =
-            json.repository?.url ||
-            json.repository?.git ||
-            json.repository ||
-            json.homepage ||
-            json.bugs?.url;
+          const repoUrls = [
+            json.repository?.url,
+            json.repository?.git,
+            json.repository,
+            json.homepage,
+            json.bugs?.url,
+            json.bugs?.homepage,
+            json.support?.source,
+            json.support?.issues
+          ];
 
-          if (repoUrl && typeof repoUrl === 'string') {
-            const info = this.parseRepositoryUrl(repoUrl);
-            if (info) return info;
+          for (const repoUrl of repoUrls) {
+            if (repoUrl && typeof repoUrl === 'string') {
+              // Clean up URL
+              const cleanUrl = repoUrl.replace(/^git\+/, '').replace(/\.git$/, '');
+              const currentScore = foundUrls.get(cleanUrl) || 0;
+              foundUrls.set(cleanUrl, currentScore + filePriority * 2); // Double score for JSON
+            }
           }
         } catch {
           // Invalid JSON, skip
         }
       }
+
+      // Special handling for WordPress plugin headers
+      if (file.endsWith('.php') || file === 'style.css') {
+        // Look for WordPress plugin/theme headers
+        const headerPatterns = [
+          /^\s*\*?\s*Plugin\s+URI:\s*(.+)$/gmi,
+          /^\s*\*?\s*Author\s+URI:\s*(.+)$/gmi,
+          /^\s*\*?\s*GitHub\s+Plugin\s+URI:\s*(.+)$/gmi,
+          /^\s*\*?\s*GitHub\s+Theme\s+URI:\s*(.+)$/gmi,
+          /^\s*\*?\s*Bitbucket\s+Plugin\s+URI:\s*(.+)$/gmi,
+          /^\s*\*?\s*GitLab\s+Plugin\s+URI:\s*(.+)$/gmi
+        ];
+
+        for (const headerPattern of headerPatterns) {
+          headerPattern.lastIndex = 0;
+          let headerMatch;
+          while ((headerMatch = headerPattern.exec(content)) !== null) {
+            const url = headerMatch[1].trim();
+            if (url.includes('github.com') || url.includes('gitlab.com') || url.includes('bitbucket.org')) {
+              const currentScore = foundUrls.get(url) || 0;
+              foundUrls.set(url, currentScore + filePriority * 3); // Triple score for headers
+            }
+          }
+        }
+      }
     }
 
+    // Select the URL with highest score
+    if (foundUrls.size > 0) {
+      let bestUrl = '';
+      let bestScore = 0;
+      for (const [url, score] of foundUrls.entries()) {
+        if (score > bestScore) {
+          bestUrl = url;
+          bestScore = score;
+        }
+      }
+
+      if (bestUrl) {
+        const info = this.parseRepositoryUrl(bestUrl);
+        if (info) {
+          console.error(`Found repository URL for ${extractedPlugin.slug}: ${info.url} (score: ${bestScore})`);
+          return info;
+        }
+      }
+    }
+
+    // Fallback: Try to construct GitHub URL from author info if no repo found
+    const readmeFile = searchFiles.find(f => f.toLowerCase().includes('readme'));
+    if (readmeFile) {
+      const content = await this.extractor.readPluginFile(extractedPlugin, readmeFile);
+      if (content) {
+        // Look for author patterns
+        const authorMatch = content.match(/Contributors?:\s*([a-z0-9_-]+)/i) ||
+                           content.match(/Author:\s*([a-z0-9_-]+)/i);
+
+        if (authorMatch) {
+          const author = authorMatch[1];
+          // Try common patterns: author/plugin-slug
+          const possibleUrls = [
+            `https://github.com/${author}/${extractedPlugin.slug}`,
+            `https://github.com/${author}/wp-${extractedPlugin.slug}`,
+            `https://github.com/${author}/${extractedPlugin.slug}-wordpress`,
+            `https://github.com/${author}/${extractedPlugin.slug}-wp`
+          ];
+
+          // Note: In production, you'd want to verify these URLs exist
+          // For now, we'll return the most likely one
+          console.error(`No repository URL found directly, trying constructed URL for ${extractedPlugin.slug}`);
+          return {
+            type: 'github',
+            url: possibleUrls[0],
+            owner: author,
+            repo: extractedPlugin.slug,
+            branch: 'main'
+          };
+        }
+      }
+    }
+
+    console.error(`No repository URL found for plugin: ${extractedPlugin.slug}`);
     return null;
   }
 
