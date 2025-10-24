@@ -16,6 +16,9 @@ A Model Context Protocol (MCP) server that enables Claude Code to analyze, downl
 - **Compare local plugins** with WordPress.org versions
 - **Generate detailed diffs** between plugin versions
 - **Browse plugin file structures**
+- **Find repository URLs** - Automatically detect source code repository URLs from plugins
+- **Download from repositories** - Clone plugin source code from GitHub, GitLab, Bitbucket, or SVN
+- **Compare with original source** - Compare WordPress.org versions with repository code, analyzing all code files (PHP, JS, CSS)
 
 ## Installation & Setup
 
@@ -103,27 +106,117 @@ Get detailed diff for a specific file.
 - `wp_org_slug` (string): WordPress.org plugin slug
 - `file_path` (string): Relative path to file
 
-## Example Workflow
+### `find_repository_url`
+Find the source code repository URL for a WordPress plugin.
 
-1. **Search for similar plugins:**
+**Parameters:**
+- `slug` (string): Plugin slug
+
+**Example:**
+```
+Find the GitHub repository for "woocommerce"
+```
+
+### `download_from_repository`
+Download plugin source code from its repository (GitHub, GitLab, Bitbucket, or SVN).
+
+**Parameters:**
+- `slug` (string): Plugin slug
+- `method` (string, optional): Download method - "git" or "http" (default: "git")
+
+**Example:**
+```
+Download the original source code for "woocommerce" from its repository
+```
+
+### `compare_with_repository`
+Compare WordPress.org plugin with its original repository, analyzing all code files (PHP, JS, CSS).
+
+**Parameters:**
+- `slug` (string): Plugin slug
+- `format` (string, optional): Output format - "summary", "detailed", or "code-focused" (default: "code-focused")
+  - `summary`: High-level overview of file differences
+  - `code-focused`: Detailed analysis of PHP, JS, and CSS files with key insights
+  - `detailed`: Complete listing of all file differences
+
+**Example:**
+```
+Compare the WordPress.org version of "woocommerce" with its GitHub repository to see all code differences
+```
+
+### `compare_local_with_source`
+**🎯 PRIMARY COMPARISON TOOL** - Compare your local plugin with the original source (repository preferred, WordPress.org as fallback).
+
+**Parameters:**
+- `local_path` (string): Path to your local plugin directory
+- `wp_org_slug` (string): WordPress.org plugin slug to use as reference
+- `prefer_repo` (boolean, optional): Prefer repository over WordPress.org when available (default: true)
+- `format` (string, optional): Output format - "summary", "detailed", or "code-focused" (default: "code-focused")
+
+**Example:**
+```
+Compare my local plugin at "/path/to/my-jwt-auth" with the original "jwt-authentication-for-wp-rest-api" source code
+```
+
+This tool automatically:
+1. Searches for the plugin's original repository (GitHub, GitLab, etc.)
+2. Uses the repository as the source of truth if found
+3. Falls back to WordPress.org version if no repository exists
+4. Provides detailed code comparison focused on PHP, JS, and CSS files
+
+## Example Workflows
+
+### Primary Workflow: Compare Your Plugin with Original Source
+
+1. **Compare your local plugin with the original source code:**
    ```
-   Search for JWT authentication plugins to see what's available
+   Use compare_local_with_source to compare "/path/to/my/jwt-plugin" with "jwt-authentication-for-wp-rest-api"
+   ```
+   This automatically finds and uses the original repository if available, or falls back to WordPress.org.
+
+2. **Examine specific file differences:**
+   ```
+   Show me the diff for "includes/class-auth.php" between my plugin and the source
    ```
 
-2. **Get plugin details:**
+3. **Get detailed analysis:**
    ```
-   Get detailed info for "jwt-authentication-for-wp-rest-api"
-   ```
-
-3. **Compare with your local plugin:**
-   ```
-   Compare my local plugin at "/path/to/my/plugin" with "jwt-authentication-for-wp-rest-api"
+   Use "detailed" format to see all file differences
    ```
 
-4. **Examine specific differences:**
+### Alternative Workflows
+
+#### Comparing with WordPress.org Only
+
+1. **Force comparison with WordPress.org version:**
    ```
-   Show me the diff for "includes/class-auth.php" between my plugin and "jwt-authentication-for-wp-rest-api"
+   Use compare_local_with_source with prefer_repo=false to compare with WordPress.org version only
    ```
+
+#### Analyzing Repository vs WordPress.org
+
+1. **Find the plugin's repository:**
+   ```
+   Find the repository URL for "woocommerce"
+   ```
+
+2. **Download from repository:**
+   ```
+   Download the source code for "woocommerce" from its GitHub repository
+   ```
+
+3. **Compare WordPress.org vs Repository:**
+   ```
+   Compare the WordPress.org version of "woocommerce" with its repository to analyze all code differences
+   ```
+
+This comprehensive comparison helps identify:
+- **PHP code modifications** between repository and WordPress.org distribution
+- **JavaScript changes** including minified files and build artifacts
+- **CSS differences** between development and production versions
+- **Build artifacts** added for WordPress.org distribution
+- **Development files** present only in the repository (tests, configs, etc.)
+- **Distribution optimizations** applied when publishing to WordPress.org
 
 ## Plugin Storage Locations
 
@@ -134,14 +227,17 @@ The server stores downloaded and extracted plugins in system directories to avoi
 **macOS:**
 - **Cache** (downloads): `~/Library/Caches/wordpress-org-mcp/`
 - **Extractions**: `/tmp/wordpress-org-mcp-extractions/`
+- **Repositories**: `/tmp/wordpress-org-mcp-extractions/repositories/`
 
 **Linux:**
 - **Cache** (downloads): `~/.cache/wordpress-org-mcp/` (or `$XDG_CACHE_HOME/wordpress-org-mcp/`)
 - **Extractions**: `/tmp/wordpress-org-mcp-extractions/`
+- **Repositories**: `/tmp/wordpress-org-mcp-extractions/repositories/`
 
 **Windows:**
 - **Cache** (downloads): `%LOCALAPPDATA%\wordpress-org-mcp\Cache\`
 - **Extractions**: `%TEMP%\wordpress-org-mcp-extractions\`
+- **Repositories**: `%TEMP%\wordpress-org-mcp-extractions\repositories\`
 
 ### Customizing Storage Locations
 
@@ -151,6 +247,7 @@ Set these environment variables before registering the MCP server:
 # Set custom paths
 export WP_MCP_CACHE_DIR="/path/to/custom/cache"
 export WP_MCP_EXTRACT_DIR="/path/to/custom/extractions"
+export WP_MCP_REPO_DIR="/path/to/custom/repositories"
 
 # Register the MCP server (will use custom paths)
 claude mcp add wordpress-org npx wordpress-org-mcp-server
@@ -167,6 +264,7 @@ source ~/.zshrc
 **Environment Variables:**
 - `WP_MCP_CACHE_DIR`: Custom directory for downloaded ZIP files
 - `WP_MCP_EXTRACT_DIR`: Custom directory for extracted plugin files
+- `WP_MCP_REPO_DIR`: Custom directory for cloned repositories
 
 ### Why System Directories?
 
