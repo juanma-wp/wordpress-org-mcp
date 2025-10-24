@@ -85,21 +85,31 @@ export class RepositoryExtractor {
     ];
 
     // Expanded list of files to search for repository URLs
+    // Include both root and nested paths for better compatibility
     const searchFiles = [
-      // Documentation files
+      // Documentation files (try nested first, then root)
+      `${extractedPlugin.slug}/readme.txt`,
       'readme.txt',
+      `${extractedPlugin.slug}/README.txt`,
       'README.txt',
+      `${extractedPlugin.slug}/readme.md`,
       'readme.md',
+      `${extractedPlugin.slug}/README.md`,
       'README.md',
       'README',
+      `${extractedPlugin.slug}/CHANGELOG.md`,
       'CHANGELOG.md',
+      `${extractedPlugin.slug}/CONTRIBUTING.md`,
       'CONTRIBUTING.md',
       // Configuration files
+      `${extractedPlugin.slug}/composer.json`,
       'composer.json',
+      `${extractedPlugin.slug}/package.json`,
       'package.json',
       '.git/config',
       'bower.json',
       // WordPress specific files
+      `${extractedPlugin.slug}/style.css`,
       'style.css',
       // Build configuration
       'Gruntfile.js',
@@ -207,6 +217,35 @@ export class RepositoryExtractor {
             if (url.includes('github.com') || url.includes('gitlab.com') || url.includes('bitbucket.org')) {
               const currentScore = foundUrls.get(url) || 0;
               foundUrls.set(url, currentScore + filePriority * 3); // Triple score for headers
+            }
+          }
+        }
+      }
+
+      // Special handling for readme.txt files
+      if (file.toLowerCase().includes('readme')) {
+        // Look for GitHub links in various sections
+        const readmePatterns = [
+          /Support and Requests:\s*.*?(https:\/\/github\.com\/[^\s\)]+)/gi,
+          /GitHub Issues\]\((https:\/\/github\.com\/[^\)]+)/gi,
+          /Donate link:\s*(https:\/\/github\.com\/[^\s]+)/gi,
+          /Development:\s*(https:\/\/github\.com\/[^\s]+)/gi,
+          /Source code:\s*(https:\/\/github\.com\/[^\s]+)/gi,
+          /Repository:\s*(https:\/\/github\.com\/[^\s]+)/gi,
+          /github\.com\/([^\/\s]+)\/([^\/\s\)\.]+)/gi
+        ];
+
+        for (const pattern of readmePatterns) {
+          pattern.lastIndex = 0;
+          let match;
+          while ((match = pattern.exec(content)) !== null) {
+            // Extract the full GitHub URL
+            let url = match[1] || match[0];
+            if (url.includes('github.com')) {
+              // Clean up the URL
+              url = url.replace(/\/issues.*$/, '').replace(/\/sponsors.*$/, '');
+              const currentScore = foundUrls.get(url) || 0;
+              foundUrls.set(url, currentScore + filePriority * 2);
             }
           }
         }
