@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/juanma-wp-wordpress-org-mcp-badge.png)](https://mseep.ai/app/juanma-wp-wordpress-org-mcp)
+
 # WordPress Plugin Directory MCP Server
 
 [![Tests](https://github.com/juanma-wp/wordpress-org-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/juanma-wp/wordpress-org-mcp/actions/workflows/test.yml)
